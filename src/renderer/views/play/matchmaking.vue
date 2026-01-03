@@ -39,26 +39,6 @@ SPDX-License-Identifier: MIT
                 >
             </div>
             <div class="button-container">
-                <div
-                    v-if="
-                        downloadsRequired &&
-                        (downloadsRequired.mapsNeeded || downloadsRequired.engineNeeded || downloadsRequired.gameNeeded)
-                    "
-                    class="downloads-required"
-                >
-                    <p>The following assets are required to join this queue:</p>
-                    <ul>
-                        <li v-if="downloadsRequired.engineNeeded">
-                            Engine: {{ downloadsRequired.engineVersion }}
-                            <Button @click="downloadEngine(downloadsRequired.engineVersion)">Download</Button>
-                        </li>
-                        <li v-if="downloadsRequired.gameNeeded">
-                            Game: {{ downloadsRequired.gameVersion }}
-                            <Button @click="downloadGame(downloadsRequired.gameVersion)">Download</Button>
-                        </li>
-                        <li v-if="downloadsRequired.mapsNeeded">Maps are missing. Please go to the maps tab to download them.</li>
-                    </ul>
-                </div>
                 <button
                     v-if="matchmakingStore.status === MatchmakingStatus.Idle"
                     class="quick-play-button"
@@ -86,6 +66,34 @@ SPDX-License-Identifier: MIT
                 >
                     {{ t("lobby.multiplayer.ranked.buttons.matchFound") }}
                 </button>
+                <div v-if="matchmakingStore.isDownloadingContent" class="download-progress-container">
+                    <div class="download-progress-header">
+                        {{ t("lobby.multiplayer.ranked.downloadingRequiredContent") }}
+                    </div>
+                    <div class="download-progress-items">
+                        <div class="download-progress-item">
+                            <span class="download-label">Map:</span>
+                            <div class="progress-bar">
+                                <div class="progress-fill" :style="{ width: `${matchmakingStore.downloadProgress.map * 100}%` }"></div>
+                            </div>
+                            <span class="download-percentage">{{ Math.round(matchmakingStore.downloadProgress.map * 100) }}%</span>
+                        </div>
+                        <div class="download-progress-item">
+                            <span class="download-label">Engine:</span>
+                            <div class="progress-bar">
+                                <div class="progress-fill" :style="{ width: `${matchmakingStore.downloadProgress.engine * 100}%` }"></div>
+                            </div>
+                            <span class="download-percentage">{{ Math.round(matchmakingStore.downloadProgress.engine * 100) }}%</span>
+                        </div>
+                        <div class="download-progress-item">
+                            <span class="download-label">Game:</span>
+                            <div class="progress-bar">
+                                <div class="progress-fill" :style="{ width: `${matchmakingStore.downloadProgress.game * 100}%` }"></div>
+                            </div>
+                            <span class="download-percentage">{{ Math.round(matchmakingStore.downloadProgress.game * 100) }}%</span>
+                        </div>
+                    </div>
+                </div>
                 <button v-else-if="matchmakingStore.status === MatchmakingStatus.MatchAccepted" class="quick-play-button" disabled>
                     {{ t("lobby.multiplayer.ranked.buttons.accepted") }}
                 </button>
@@ -111,14 +119,7 @@ import Button from "primevue/button";
 import { useTypedI18n } from "@renderer/i18n";
 import { computed, onActivated } from "vue";
 
-import { downloadEngine } from "@renderer/store/engine.store";
-import { downloadGame } from "@renderer/store/game.store";
-
 const { t } = useTypedI18n();
-
-const downloadsRequired = computed(() => {
-    return matchmakingStore.downloadsRequired[matchmakingStore.selectedQueue];
-});
 
 const availableQueueIds = computed(() => {
     return matchmakingStore.playlists.sort((a, b) => a.teamSize * a.numOfTeams - b.teamSize * b.numOfTeams).map((playlist) => playlist.id);
@@ -287,15 +288,14 @@ onActivated(() => {
     font-size: 1.5rem;
     padding: 20px 40px;
     color: #fff;
-    // background: linear-gradient(90deg, #c52222, #a31616);
     border: none;
     border-radius: 2px;
-    // box-shadow: 0 0 15px rgba(197, 34, 34, 0.4);
     text-align: center;
     cursor: pointer;
     position: relative;
     overflow: hidden;
     transition: all 0.3s ease;
+    margin-bottom: 20px;
 }
 
 .cancel-button:hover {
@@ -348,5 +348,66 @@ onActivated(() => {
         gap: 10px;
         margin-bottom: 5px;
     }
+}
+
+.download-progress-container {
+    align-self: center;
+    width: 500px;
+    background: rgba(0, 0, 0, 0.4);
+    padding: 20px;
+    border: 1px solid #22c55e;
+    border-radius: 4px;
+    margin-bottom: 20px;
+    margin-top: 10px; /* Added space above container */
+    text-align: center;
+}
+
+.download-progress-header {
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: #22c55e;
+    margin-bottom: 15px;
+    text-transform: uppercase;
+}
+
+.download-progress-items {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.download-progress-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.download-label {
+    flex: 0 0 60px;
+    text-align: right;
+    color: rgba(255, 255, 255, 0.8);
+    font-weight: bold;
+}
+
+.progress-bar {
+    flex: 1;
+    height: 20px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+    overflow: hidden;
+    position: relative;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #22c55e, #16a34a);
+    transition: width 0.3s ease;
+}
+
+.download-percentage {
+    flex: 0 0 40px;
+    text-align: left;
+    color: rgba(255, 255, 255, 0.8);
+    font-weight: bold;
 }
 </style>

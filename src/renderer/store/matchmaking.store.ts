@@ -10,12 +10,21 @@ import {
     MatchmakingListOkResponseData,
     MatchmakingQueuesJoinedEventData,
     MatchmakingQueueUpdateEventData,
+    UserSelfEventData,
+    PrivateBattle,
 } from "tachyon-protocol/types";
 import { tachyonStore } from "@renderer/store/tachyon.store";
 import { db } from "@renderer/store/db";
 import { notificationsApi } from "@renderer/api/notifications";
 import { gameStore } from "@renderer/store/game.store";
 import { enginesStore } from "@renderer/store/engine.store";
+import { downloadMap } from "@renderer/store/maps.store";
+import { downloadEngine } from "@renderer/store/engine.store";
+import { downloadGame } from "@renderer/store/game.store";
+import { DownloadInfo } from "@main/content/downloads";
+
+// DEV/TEST FLAG: Set to true to simulate asset downloads instead of real downloads
+const testAssetDownload = true;
 
 export enum MatchmakingStatus {
     Idle = "Idle",
@@ -46,6 +55,14 @@ export const matchmakingStore: {
             gameVersion: string;
         };
     };
+    // Battle download state
+    currentBattle?: PrivateBattle;
+    isDownloadingContent: boolean;
+    downloadProgress: {
+        map: number;
+        engine: number;
+        game: number;
+    };
 } = reactive({
     isInitialized: false,
     isDrawerOpen: false,
@@ -58,6 +75,13 @@ export const matchmakingStore: {
     playersReady: 0,
     playersQueued: 0,
     downloadsRequired: {},
+    currentBattle: undefined,
+    isDownloadingContent: false,
+    downloadProgress: {
+        map: 0,
+        engine: 0,
+        game: 0,
+    },
 });
 
 function onQueueUpdateEvent(data: MatchmakingQueueUpdateEventData) {
@@ -93,6 +117,124 @@ function onFoundEvent(data: MatchmakingFoundEventData) {
 function onQueuesJoinedEvent(data: MatchmakingQueuesJoinedEventData) {
     console.log("Tachyon event: matchmaking/queuesJoined:", data);
     matchmakingStore.status = MatchmakingStatus.Searching;
+}
+
+function onUserSelfEvent(data: UserSelfEventData) {
+    console.log("Tachyon event: user/self:", data);
+
+    // Check if we just got assigned to a battle after accepting match
+    if (data.user.currentBattle && matchmakingStore.status === MatchmakingStatus.MatchAccepted) {
+        const battle = data.user.currentBattle;
+        console.log("Battle assigned! Downloading content:", battle.map.springName, battle.game.springName, battle.engine.version);
+
+        // Start downloading battle content
+        downloadBattleContent(battle);
+    }
+}
+
+async function downloadBattleContent(battle: PrivateBattle): Promise<void> {
+    matchmakingStore.currentBattle = battle;
+    matchmakingStore.isDownloadingContent = true;
+    matchmakingStore.downloadProgress = { map: 0, engine: 0, game: 0 };
+
+    // Check if we should use simulated downloads for testing
+    if (testAssetDownload) {
+        console.log("Using SIMULATED downloads for battle content:", {
+            map: battle.map.springName,
+            engine: battle.engine.version,
+            game: battle.game.springName,
+        });
+
+        // Simulate progressive downloads with different speeds for each content type
+        const simulateProgress = () => {
+            return new Promise<void>((resolve) => {
+                let mapProgress = 0;
+                let engineProgress = 0;
+                let gameProgress = 0;
+
+                const interval = setInterval(() => {
+                    // Different download speeds for realism
+                    mapProgress = Math.min(mapProgress + 0.08, 1);
+                    engineProgress = Math.min(engineProgress + 0.12, 1);
+                    gameProgress = Math.min(gameProgress + 0.06, 1);
+
+                    matchmakingStore.downloadProgress = {
+                        map: mapProgress,
+                        engine: engineProgress,
+                        game: gameProgress,
+                    };
+
+                    // All downloads complete
+                    if (mapProgress === 1 && engineProgress === 1 && gameProgress === 1) {
+                        clearInterval(interval);
+                        resolve();
+                    }
+                }, 200);
+            });
+        };
+
+        try {
+            await simulateProgress();
+            console.log("All battle content downloaded successfully (simulated)");
+            notificationsApi.alert({ text: "Battle content downloaded. Ready to launch!", severity: "info" });
+        } catch (error) {
+            console.error("Failed to download battle content:", error);
+            notificationsApi.alert({ text: "Failed to download required content for battle", severity: "error" });
+        } finally {
+            matchmakingStore.isDownloadingContent = false;
+        }
+        return;
+    }
+
+    // Real download logic below
+    // Set up event listeners for progress updates
+    const cleanupEventListeners: (() => void)[] = [];
+
+    // Helper to create progress event listener
+    const createProgressListener = (type: "map" | "engine" | "game") => {
+        return (downloadInfo: DownloadInfo) => {
+            if (downloadInfo.name === (type === "map" ? battle.map.springName : type === "engine" ? battle.engine.version : battle.game.springName)) {
+                matchmakingStore.downloadProgress[type] = downloadInfo.progress;
+            }
+        };
+    };
+
+    // Set up progress listeners
+    const mapProgressListener = createProgressListener("map");
+    const engineProgressListener = createProgressListener("engine");
+    const gameProgressListener = createProgressListener("game");
+
+    window.downloads.onDownloadMapProgress(mapProgressListener);
+    window.downloads.onDownloadEngineProgress(engineProgressListener);
+    window.downloads.onDownloadGameProgress(gameProgressListener);
+
+    cleanupEventListeners.push(
+        () => window.downloads.onDownloadMapProgress(() => {}),
+        () => window.downloads.onDownloadEngineProgress(() => {}),
+        () => window.downloads.onDownloadGameProgress(() => {})
+    );
+
+    try {
+        // Start downloads (no callback parameters - they use events)
+        await downloadMap(battle.map.springName);
+        matchmakingStore.downloadProgress.map = 1;
+
+        await downloadEngine(battle.engine.version);
+        matchmakingStore.downloadProgress.engine = 1;
+
+        await downloadGame(battle.game.springName);
+        matchmakingStore.downloadProgress.game = 1;
+
+        console.log("All battle content downloaded successfully");
+        notificationsApi.alert({ text: "Battle content downloaded. Ready to launch!", severity: "info" });
+    } catch (error) {
+        console.error("Failed to download battle content:", error);
+        notificationsApi.alert({ text: "Failed to download required content for battle", severity: "error" });
+    } finally {
+        // Clean up event listeners
+        cleanupEventListeners.forEach((cleanup) => cleanup());
+        matchmakingStore.isDownloadingContent = false;
+    }
 }
 
 async function sendListRequest() {
@@ -169,14 +311,22 @@ async function sendQueueRequest() {
         await sendListRequest();
         return;
     }
-    if (
-        matchmakingStore.downloadsRequired[matchmakingStore.selectedQueue].mapsNeeded ||
-        matchmakingStore.downloadsRequired[matchmakingStore.selectedQueue].engineNeeded ||
-        matchmakingStore.downloadsRequired[matchmakingStore.selectedQueue].gameNeeded
-    ) {
-        notificationsApi.alert({ text: "You have downloads required to join this queue.", severity: "info" });
-        return;
-    }
+    // testing download of battle content before actually joining queue
+    downloadBattleContent({
+        username: "string",
+        password: "string",
+        ip: "string",
+        port: 0,
+        engine: {
+            version: "",
+        },
+        game: {
+            springName: "",
+        },
+        map: {
+            springName: "",
+        },
+    } as PrivateBattle);
     matchmakingStore.status = MatchmakingStatus.JoinRequested; // Initial state, likely short-lived.
     try {
         matchmakingStore.errorMessage = null;
@@ -231,6 +381,8 @@ export async function initializeMatchmakingStore() {
 
     window.tachyon.onEvent("matchmaking/queuesJoined", onQueuesJoinedEvent);
 
+    window.tachyon.onEvent("user/self", onUserSelfEvent);
+
     if (tachyonStore.isConnected) {
         await sendListRequest();
     }
@@ -238,4 +390,9 @@ export async function initializeMatchmakingStore() {
     matchmakingStore.isInitialized = true;
 }
 
-export const matchmaking = { sendCancelRequest, sendQueueRequest, sendReadyRequest, sendListRequest };
+export const matchmaking = {
+    sendCancelRequest,
+    sendQueueRequest,
+    sendReadyRequest,
+    sendListRequest,
+};

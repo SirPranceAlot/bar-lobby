@@ -136,7 +136,8 @@
                     "matchFound": "Match found",
                     "accepted": "Accepted",
                     "cancel": "Cancel"
-                }
+                },
+                "downloadingRequiredContent": "Downloading required content"
             },
             "battle": {
                 "title": "Multiplayer Custom Battle"
