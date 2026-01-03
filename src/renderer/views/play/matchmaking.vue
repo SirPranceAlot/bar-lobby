@@ -39,6 +39,26 @@ SPDX-License-Identifier: MIT
                 >
             </div>
             <div class="button-container">
+                <div
+                    v-if="
+                        downloadsRequired &&
+                        (downloadsRequired.mapsNeeded || downloadsRequired.engineNeeded || downloadsRequired.gameNeeded)
+                    "
+                    class="downloads-required"
+                >
+                    <p>The following assets are required to join this queue:</p>
+                    <ul>
+                        <li v-if="downloadsRequired.engineNeeded">
+                            Engine: {{ downloadsRequired.engineVersion }}
+                            <Button @click="downloadEngine(downloadsRequired.engineVersion)">Download</Button>
+                        </li>
+                        <li v-if="downloadsRequired.gameNeeded">
+                            Game: {{ downloadsRequired.gameVersion }}
+                            <Button @click="downloadGame(downloadsRequired.gameVersion)">Download</Button>
+                        </li>
+                        <li v-if="downloadsRequired.mapsNeeded">Maps are missing. Please go to the maps tab to download them.</li>
+                    </ul>
+                </div>
                 <button
                     v-if="matchmakingStore.status === MatchmakingStatus.Idle"
                     class="quick-play-button"
@@ -91,7 +111,14 @@ import Button from "primevue/button";
 import { useTypedI18n } from "@renderer/i18n";
 import { computed, onActivated } from "vue";
 
+import { downloadEngine } from "@renderer/store/engine.store";
+import { downloadGame } from "@renderer/store/game.store";
+
 const { t } = useTypedI18n();
+
+const downloadsRequired = computed(() => {
+    return matchmakingStore.downloadsRequired[matchmakingStore.selectedQueue];
+});
 
 const availableQueueIds = computed(() => {
     return matchmakingStore.playlists.sort((a, b) => a.teamSize * a.numOfTeams - b.teamSize * b.numOfTeams).map((playlist) => playlist.id);
@@ -293,5 +320,33 @@ onActivated(() => {
 .disabled {
     cursor: not-allowed;
     opacity: 0.1;
+}
+
+.downloads-required {
+    background: rgba(0, 0, 0, 0.4);
+    padding: 15px;
+    border: 1px solid #eab308;
+    border-radius: 4px;
+    margin-bottom: 20px;
+    text-align: left;
+
+    p {
+        margin: 0 0 10px 0;
+        font-weight: bold;
+        color: #eab308;
+    }
+
+    ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+
+    li {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 5px;
+    }
 }
 </style>

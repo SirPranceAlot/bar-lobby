@@ -14,6 +14,8 @@ import {
 import { tachyonStore } from "@renderer/store/tachyon.store";
 import { db } from "@renderer/store/db";
 import { notificationsApi } from "@renderer/api/notifications";
+import { gameStore } from "@renderer/store/game.store";
+import { enginesStore } from "@renderer/store/engine.store";
 
 export enum MatchmakingStatus {
     Idle = "Idle",
@@ -37,7 +39,11 @@ export const matchmakingStore: {
     // Each playlist will have it's own boolean, as the 'needed' property of an object keyed to the playlist's names
     downloadsRequired: {
         [k: string]: {
-            needed: boolean;
+            mapsNeeded: boolean;
+            engineNeeded: boolean;
+            gameNeeded: boolean;
+            engineVersion: string;
+            gameVersion: string;
         };
     };
 } = reactive({
@@ -96,7 +102,6 @@ async function sendListRequest() {
         const response = await window.tachyon.request("matchmaking/list");
         console.log("Tachyon: matchmaking/list:", response.data);
         matchmakingStore.playlists = response.data.playlists;
-
         // Set default selected queue if current selection is not available
         const hasSelectedQueue = matchmakingStore.playlists.some((playlist) => playlist.id === matchmakingStore.selectedQueue);
         if (matchmakingStore.playlists.length > 0 && !hasSelectedQueue) {
@@ -104,10 +109,22 @@ async function sendListRequest() {
         }
         // Clear the "downloadsRequired" list because we have all-new playlist response
         matchmakingStore.downloadsRequired = {};
-        // Find out of we have the necessary maps for each queue we've been given.
-        matchmakingStore.playlists.forEach(async (queue) => {
-            matchmakingStore.downloadsRequired[queue.id] = { needed: await checkIfAnyMapsAreNeeded(queue.maps) };
-        });
+        await Promise.all(
+            matchmakingStore.playlists.map(async (queue) => {
+                const mapsNeeded = await checkIfAnyMapsAreNeeded(queue.maps);
+                const engineNeeded = await checkIfEngineIsNeeded(queue.engines);
+                const gameNeeded = await checkIfGameIsNeeded(queue.games);
+                console.log(`Matchmaking queue ${queue.id} needs downloads - maps: ${mapsNeeded}, engine: ${engineNeeded}, game: ${gameNeeded}`);
+                matchmakingStore.downloadsRequired[queue.id] = {
+                    mapsNeeded: mapsNeeded,
+                    engineNeeded,
+                    gameNeeded,
+                    engineVersion: queue.engines?.[0]?.version ?? "",
+                    gameVersion: queue.games?.[0]?.springName ?? "",
+                };
+            })
+        );
+        //log.info(`Matchmaking downloads required:`, matchmakingStore.downloadsRequired);
     } catch (error) {
         console.error("Tachyon error: matchmaking/list:", error);
         notificationsApi.alert({ text: "Tachyon error: matchmaking/list", severity: "error" });
@@ -117,14 +134,28 @@ async function sendListRequest() {
     }
 }
 
-async function checkIfAnyMapsAreNeeded(maps: { springName: string }[]): Promise<boolean> {
-    if (maps.length == 0) return false;
-    const queueMaps = maps.map((m) => m.springName);
+async function checkIfAnyMapsAreNeeded(maps: { mapName: string }[]): Promise<boolean> {
+    if (!maps || maps.length === 0) return false;
+    console.log("Checking maps needed for:", maps);
+    const queueMaps = maps.map((m) => m.mapName);
     const dbMaps = await db.maps.bulkGet(queueMaps);
     for (const map of dbMaps) {
         if (map == undefined || !map.isInstalled) return true;
     }
     return false;
+}
+
+async function checkIfEngineIsNeeded(engines: { version: string }[]): Promise<boolean> {
+    if (!engines || engines.length === 0) return false;
+    const requiredVersions = engines.map((e) => e.version);
+    const installedVersions = enginesStore.availableEngineVersions.map((v) => v.id);
+    return !requiredVersions.some((required) => installedVersions.includes(required));
+}
+
+async function checkIfGameIsNeeded(games: { springName: string }[]): Promise<boolean> {
+    if (!games || games.length === 0) return false;
+    const requiredGames = games.map((g) => g.springName);
+    return !requiredGames.some((required) => gameStore.availableGameVersions.has(required));
 }
 
 export function getPlaylistName(id: string): string {
@@ -138,7 +169,11 @@ async function sendQueueRequest() {
         await sendListRequest();
         return;
     }
-    if (matchmakingStore.downloadsRequired[matchmakingStore.selectedQueue].needed) {
+    if (
+        matchmakingStore.downloadsRequired[matchmakingStore.selectedQueue].mapsNeeded ||
+        matchmakingStore.downloadsRequired[matchmakingStore.selectedQueue].engineNeeded ||
+        matchmakingStore.downloadsRequired[matchmakingStore.selectedQueue].gameNeeded
+    ) {
         notificationsApi.alert({ text: "You have downloads required to join this queue.", severity: "info" });
         return;
     }
